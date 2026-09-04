@@ -1,0 +1,8 @@
+request:
+  weights: {rules: 0.35, similarity: 0.30, obfuscation: 0.10, judge: 0.25}
+  judge_band: [30, 70]
+  thresholds: {review: 30, block: 70}
+response:
+  weights: {leakage_patterns: 0.45, expected_behavior: 0.30, judge: 0.25}
+  thresholds: {review: 30, block: 70}
+similarity_threshold: 0.85

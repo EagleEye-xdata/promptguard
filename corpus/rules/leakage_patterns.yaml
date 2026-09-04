@@ -1,0 +1,5 @@
+patterns:
+  - {name: openai-key, pattern_type: regex, pattern: "sk-[A-Za-z0-9_-]{16,}", category: secret, severity: CRITICAL, weight: 100, enabled: true}
+  - {name: aws-key, pattern_type: regex, pattern: "AKIA[0-9A-Z]{16}", category: secret, severity: CRITICAL, weight: 100, enabled: true}
+  - {name: email, pattern_type: regex, pattern: "[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}", category: pii, severity: HIGH, weight: 60, enabled: true}
+  - {name: planted-canary, pattern_type: canary_token, pattern: "GENESIS-7731-INTERNAL", category: system_prompt, severity: CRITICAL, weight: 100, enabled: true}

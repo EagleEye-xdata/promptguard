@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment: {POSTGRES_USER: promptguard, POSTGRES_PASSWORD: promptguard, POSTGRES_DB: promptguard}
+    healthcheck: {test: [CMD-SHELL, "pg_isready -U promptguard"], interval: 5s, timeout: 3s, retries: 20}
+    volumes: [promptguard-data:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    healthcheck: {test: [CMD, redis-cli, ping], interval: 5s, timeout: 3s, retries: 20}
+  target-demo:
+    build: {context: ., dockerfile: target_demo/Dockerfile}
+    environment: {MOCK_LLM: "1", CANARY_SECRET: GENESIS-7731-INTERNAL}
+    ports: ["8001:8001"]
+  api:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    environment:
+      DATABASE_URL: postgresql+psycopg://promptguard:promptguard@postgres:5432/promptguard
+      REDIS_URL: redis://redis:6379/0
+      DEMO_TARGET_URL: http://target-demo:8001/v1/chat/completions
+      JUDGE_PROVIDER: none
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      target-demo: {condition: service_started}
+  frontend:
+    build: {context: ., dockerfile: frontend/Dockerfile}
+    environment: {VITE_API_URL: http://localhost:8000}
+    ports: ["5173:5173"]
+    depends_on: [api]
+volumes: {promptguard-data: {}}

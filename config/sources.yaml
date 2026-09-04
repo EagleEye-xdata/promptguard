@@ -1,0 +1,5 @@
+# GitHub enrichment is disabled by default. Add only license-reviewed, commit-pinned sources.
+sources: []
+# - url: https://github.com/example/research-corpus
+#   commit: 0123456789abcdef0123456789abcdef01234567
+#   license: MIT

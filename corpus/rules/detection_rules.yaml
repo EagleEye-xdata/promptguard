@@ -1,0 +1,5 @@
+rules:
+  - {name: ignore-instructions, category: instruction_override, pattern: "ignore (all |any )?(previous|prior|above) instructions?", weight: 70, enabled: true}
+  - {name: role-change, category: role_manipulation, pattern: "you are now|act as|pretend to be|developer mode|\\bDAN\\b", weight: 58, enabled: true}
+  - {name: prompt-extraction, category: system_prompt_extraction, pattern: "system prompt|hidden instructions|what were you told", weight: 62, enabled: true}
+  - {name: delimiter, category: delimiter_manipulation, pattern: "```system|### developer|<system>", weight: 65, enabled: true}
