@@ -5,11 +5,16 @@ from typing import Any
 
 RULES = [
  ("ignore-instructions", "instruction_override", re.compile(r"ignore (all |any )?(previous|prior|above) instructions?", re.I), 70),
- ("role-change", "role_manipulation", re.compile(r"you are now|act as|pretend (?:you are|to be)|developer mode|\bDAN\b", re.I), 58),
+ ("role-change", "role_manipulation", re.compile(r"you are now|pretend (?:you are|to be)|developer mode|\bDAN\b|act as (?:an? )?(?:system|backend|unrestricted|developer|administrator|auditor|debugger)", re.I), 58),
  ("prompt-extraction", "system_prompt_extraction", re.compile(r"system prompt|repeat (?:your|the) instructions|what were you told|hidden instructions", re.I), 62),
  ("delimiter", "delimiter_manipulation", re.compile(r"```\s*(system|developer)|###\s*(system|developer)|<system>", re.I), 65),
  ("hierarchy", "instruction_hierarchy", re.compile(r"higher priority|supersede|most important instruction|developer message", re.I), 58),
  ("secret-request", "system_prompt_extraction", re.compile(r"reveal|print|output|exfiltrate", re.I), 28),
+ ("override-synonym", "instruction_override", re.compile(r"set aside|disregard|replace (?:the|your|current)|obsolete|suspend|bypass|supersede|outranks?|restrictions? (?:do|does) not apply", re.I), 55),
+ ("protected-object", "system_prompt_extraction", re.compile(r"private|protected|confidential|internal|hidden|system (?:message|instructions?)|operating rules?|initiali[sz]ed your behavior|setup text", re.I), 42),
+ ("disclosure-intent", "system_prompt_extraction", re.compile(r"disclos(?:e|ure)|dump|emit|expose|reconstruct|reproduce|return the exact|numbered checklist", re.I), 45),
+ ("authority-claim", "instruction_hierarchy", re.compile(r"administrator|operator|authority update|granted permission|backend diagnostic|developer>", re.I), 38),
+ ("indirect-command", "indirect_injection", re.compile(r"retrieved (?:web)?page says|document says|execute the phrase|instruction (?:inside|in) (?:the )?(?:document|page|email)", re.I), 48),
 ]
 
 def _tokens(s:str)->Counter:
@@ -31,8 +36,12 @@ def normalize(text:str)->tuple[str,list[dict[str,Any]]]:
         except (ValueError,UnicodeError,binascii.Error): pass
     dehom=normalized.translate(str.maketrans({"а":"a","е":"e","о":"o","р":"p","с":"c"}))
     if dehom != normalized: evidence.append({"type":"homoglyph","decoded":dehom[:1000]}); normalized=dehom
+    # Apply leetspeak decoding only when multiple substitutions appear. This
+    # avoids corrupting ordinary text containing a version number or date.
+    leet_hits=sum(normalized.lower().count(c) for c in "431057")
     deleet=normalized.lower().translate(str.maketrans("431057","aeiost"))
-    if deleet != normalized.lower() and any(c.isdigit() for c in normalized): evidence.append({"type":"leetspeak","decoded":deleet[:1000]})
+    if leet_hits>=3:
+        evidence.append({"type":"leetspeak","decoded":deleet[:1000]}); normalized=deleet
     return normalized, evidence
 
 def inspect_request(text:str, corpus:list[dict[str,Any]], judge_score:float|None=None)->dict[str,Any]:
@@ -40,18 +49,29 @@ def inspect_request(text:str, corpus:list[dict[str,Any]], judge_score:float|None
     matched=[{"name":n,"category":c,"weight":w,"match":m.group(0)} for n,c,r,w in RULES if (m:=r.search(normalized))]
     rule_score=min(100,sum(x["weight"] for x in matched))
     best={"id":None,"score":0.0,"category":None}
+    normalized_lower=" ".join(normalized.lower().split())
     for item in corpus:
-        score=lexical_similarity(normalized,item["prompt"])
+        pattern=" ".join(item["prompt"].lower().split())
+        # Wrapped attacks preserve the original payload as a contiguous span.
+        # Recognizing that relationship is safer than lowering the global
+        # similarity threshold, which would increase false positives.
+        score=1.0 if len(pattern)>20 and pattern in normalized_lower else lexical_similarity(normalized,item["prompt"])
         if score>best["score"]: best={"id":item["id"],"score":round(score,4),"category":item["category"]}
     similarity_score=100 if best["score"]>=.85 else (best["score"]/.85)*100
     base=.35*rule_score+.30*similarity_score+.10*(100 if decoded else 0)
+    discussion=bool(re.search(r"^\s*(explain|discuss|describe|define|write (?:an?|the) (?:article|guide)|how (?:can|do|should) (?:i|we) (?:detect|prevent|protect)|what (?:is|are|does))\b",normalized,re.I))
+    discussion=discussion or bool(re.search(r"^\s*how do i .*(?:in|for) (?:a |my )?(?:config|configuration|code|application|document|article)\b",normalized,re.I))
+    # A clear educational/meta-security frame lowers risk, but never erases
+    # evidence. The event remains reviewable when another strong signal fires.
+    if discussion and not decoded:
+        base*=.45
     judge_used=judge_score is not None and 30<=base<=70
     risk=min(100,base+(.25*judge_score if judge_used else 0))
     signals=sum([bool(matched),best["score"]>=.85,bool(decoded),judge_used and judge_score>=60])
     confidence=min(.98,.35+.18*signals)
     action="BLOCK" if risk>=70 and confidence>=.6 and signals>=2 else "REVIEW" if risk>=30 else "ALLOW"
     category=(matched[0]["category"] if matched else best["category"])
-    return {"attack_detected":action!="ALLOW","attack_type":category,"risk_score":round(risk,2),"confidence":round(confidence,2),"action":action,"evidence":{"matched_rules":matched,"top_similarity":best,"decoded_obfuscation":decoded,"judge":{"used":judge_used,"score":judge_score},"timings":{"total_ms":round((time.perf_counter()-started)*1000,3)}}}
+    return {"attack_detected":action!="ALLOW","attack_type":category,"risk_score":round(risk,2),"confidence":round(confidence,2),"action":action,"evidence":{"matched_rules":matched,"top_similarity":best,"decoded_obfuscation":decoded,"benign_discussion_context":discussion,"judge":{"used":judge_used,"score":judge_score},"timings":{"total_ms":round((time.perf_counter()-started)*1000,3)}}}
 
 LEAKS=[("openai_key","secret",re.compile(r"sk-[A-Za-z0-9_-]{16,}"),100),("aws_key","secret",re.compile(r"AKIA[0-9A-Z]{16}"),100),("jwt","secret",re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),95),("email","pii",re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"),60),("ssn","pii",re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),90)]
 

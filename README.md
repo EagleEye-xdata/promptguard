@@ -29,6 +29,7 @@ Only test systems you own or are explicitly authorized to assess. Target registr
 python -m pip install -r backend/requirements.txt
 python scripts/seed_corpus.py
 python -m pytest -q
+python scripts/benchmark.py
 cd frontend && npm install && npm run build
 ```
 
@@ -38,3 +39,7 @@ cd frontend && npm install && npm run build
 - Response risk: leakage 45%, expected behavior 30%, optional judge 25%. Canary/secret/PII matches preserve offsets for redaction.
 - All external and corpus text is treated as untrusted data. Judge inputs are delimited and its strict JSON is validated, retried once, then marked inconclusive.
 - GitHub ingestion is an allowlisted, commit-pinned enrichment path; runtime inspection never depends on GitHub.
+
+Accuracy must be reported from `python scripts/benchmark.py`. The held-out set,
+seed regression set, and generated-mutation coverage are deliberately separated;
+seed regression is not a claim of real-world generalization.
