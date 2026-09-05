@@ -6,10 +6,22 @@ from .secrets import reveal
 
 def extract_text_from_any_response(data: any, custom_field: str | None = None) -> str:
     """
-    Universally extracts text from any model response structure.
+    Extracts text from Hugging Face API, Serverless Router, or target response structures.
     """
     if isinstance(data, str):
         return data
+
+    if isinstance(data, list):
+        if len(data) == 0:
+            return ""
+        first = data[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict):
+            if "generated_text" in first:
+                return str(first["generated_text"] or "")
+            return extract_text_from_any_response(first, custom_field)
+        return str(first)
 
     if not isinstance(data, dict):
         return str(data)
@@ -17,7 +29,7 @@ def extract_text_from_any_response(data: any, custom_field: str | None = None) -
     if custom_field and custom_field in data:
         return str(data[custom_field])
 
-    # 1. Standard OpenAI / Groq / DeepSeek / Mistral / xAI Grok / OpenRouter / Together / Perplexity / vLLM / Ollama
+    # 1. Hugging Face Router & OpenAI-compatible Chat format
     if "choices" in data and isinstance(data["choices"], list) and len(data["choices"]) > 0:
         choice = data["choices"][0]
         if isinstance(choice, dict):
@@ -26,33 +38,12 @@ def extract_text_from_any_response(data: any, custom_field: str | None = None) -
             if "text" in choice:
                 return str(choice["text"] or "")
 
-    # 2. Anthropic Claude
-    if "content" in data and isinstance(data["content"], list) and len(data["content"]) > 0:
-        first = data["content"][0]
-        if isinstance(first, dict) and "text" in first:
-            return str(first["text"] or "")
+    # 2. Hugging Face single dict output
+    if "generated_text" in data:
+        return str(data["generated_text"] or "")
 
-    # 3. Google Gemini (REST & SDK shapes)
-    if "candidates" in data and isinstance(data["candidates"], list) and len(data["candidates"]) > 0:
-        cand = data["candidates"][0]
-        if isinstance(cand, dict) and "content" in cand:
-            parts = cand["content"].get("parts", [])
-            if parts and isinstance(parts, list) and len(parts) > 0 and "text" in parts[0]:
-                return str(parts[0]["text"] or "")
-
-    # 4. Cohere v2 & v1
-    if "message" in data and isinstance(data["message"], dict) and "content" in data["message"]:
-        cont = data["message"]["content"]
-        if isinstance(cont, list) and len(cont) > 0 and "text" in cont[0]:
-            return str(cont[0]["text"])
-        if isinstance(cont, str):
-            return cont
-
-    if "generations" in data and isinstance(data["generations"], list) and len(data["generations"]) > 0:
-        return str(data["generations"][0].get("text", ""))
-
-    # 5. Common generic fields
-    for key in ["response", "answer", "output", "text", "message", "result", "generated_text", "bot_response"]:
+    # 3. Generic standard response fields
+    for key in ["response", "answer", "output", "text", "message", "result"]:
         if key in data and data[key] is not None:
             if isinstance(data[key], str):
                 return data[key]
@@ -65,68 +56,75 @@ def extract_text_from_any_response(data: any, custom_field: str | None = None) -
 
 
 async def call_target(target: Target, message: str, session_id: str) -> str:
-    headers = {"content-type": "application/json"}
+    """
+    Dispatches prompt to configured Hugging Face target model or custom target bot endpoint.
+    """
     auth_val = ""
     if target.auth_config_encrypted:
         auth_val = reveal(target.auth_config_encrypted, settings.encryption_key) or ""
 
     preset = (target.request_format.get("preset") or "").lower()
-    endpoint = target.api_endpoint.lower()
-    model_name = target.model_name or "gpt-4o-mini"
+    endpoint = (target.api_endpoint or "").lower()
+    model_name = target.model_name or "mistralai/Mistral-7B-Instruct-v0.3"
 
-    # 1. Google Gemini Native API Format
-    if preset == "gemini" or ("generativelanguage.googleapis.com" in endpoint and "openai" not in endpoint):
-        key = auth_val.replace("Bearer ", "").strip()
-        if key:
-            headers["x-goog-api-key"] = key
-        payload = {
-            "contents": [{
-                "parts": [{"text": message}]
-            }],
-            "generationConfig": {
-                "maxOutputTokens": 1024,
-                "temperature": 0.7
-            }
-        }
-    # 2. Anthropic Claude Format
-    elif preset == "anthropic" or "anthropic.com" in endpoint:
-        if auth_val:
-            headers["x-api-key"] = auth_val.replace("Bearer ", "").strip()
-        headers["anthropic-version"] = "2023-06-01"
-        payload = {
-            "model": model_name or "claude-3-5-haiku-20241022",
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": message}]
-        }
-    # 3. Cohere Format
-    elif preset == "cohere" or "cohere.com" in endpoint:
-        if auth_val:
-            headers["authorization"] = auth_val if auth_val.startswith("Bearer ") or " " in auth_val else f"Bearer {auth_val}"
-        payload = {
-            "model": model_name or "command-r-plus-08-2024",
-            "messages": [{"role": "user", "content": message}]
-        }
-    # 4. Generic REST JSON Webhook
-    elif preset == "generic_json":
-        if auth_val:
-            headers["authorization"] = auth_val if auth_val.startswith("Bearer ") or " " in auth_val else f"Bearer {auth_val}"
-        msg_field = target.request_format.get("message_field", "message")
-        payload = {msg_field: message, "session_id": session_id}
-        if model_name:
-            payload["model"] = model_name
-    # 5. Standard OpenAI Format (Covers OpenAI, Grok, Groq, DeepSeek, Mistral, OpenRouter, Together, Perplexity, Qwen, Ollama, vLLM)
-    else:
-        if auth_val:
-            headers["authorization"] = auth_val if auth_val.startswith("Bearer ") or " " in auth_val else f"Bearer {auth_val}"
+    # Hugging Face Model or Router Target
+    if preset == "huggingface" or "huggingface.co" in endpoint:
+        from .hf_adapter import call_huggingface_target
+        return await call_huggingface_target(
+            api_endpoint=target.api_endpoint,
+            model_name=model_name,
+            token=auth_val,
+            prompt=message,
+            system_instruction=target.declared_policy,
+            custom_text_field=target.response_format.get("text_field") if target.response_format else None
+        )
+
+    # Standard / Custom Target Bot API Endpoint
+    headers = {"content-type": "application/json"}
+    if auth_val:
+        headers["authorization"] = auth_val if auth_val.startswith("Bearer ") or " " in auth_val else f"Bearer {auth_val}"
+
+    # Build payload based on format preset
+    if preset in ["openai", "openai_chat"] or "api.openai.com" in endpoint or "/v1/chat/completions" in endpoint:
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": message}]
         }
+    else:
+        msg_field = target.request_format.get("message_field", "message")
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": message}],
+            msg_field: message,
+            "session_id": session_id
+        }
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(target.api_endpoint, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(target.api_endpoint, json=payload, headers=headers)
+            if response.status_code != 200:
+                try:
+                    err_json = response.json()
+                    err_detail = err_json.get("error", {}).get("message") or err_json.get("message") or str(err_json)
+                except Exception:
+                    err_detail = response.text or f"HTTP {response.status_code}"
+                
+                if response.status_code == 401:
+                    return f"[Target API Error 401 Unauthorized]: {err_detail} (Invalid or expired API Key)"
+                elif response.status_code == 429:
+                    return f"[Target API Error 429 Rate Limit Exceeded]: {err_detail}"
+                elif response.status_code == 404:
+                    return f"[Target API Error 404 Not Found]: Endpoint {target.api_endpoint} not found."
+                else:
+                    return f"[Target API Error {response.status_code}]: {err_detail}"
 
-    custom_text_field = target.response_format.get("text_field") if target.response_format else None
-    return extract_text_from_any_response(data, custom_text_field)
+            data = response.json()
+            custom_text_field = target.response_format.get("text_field") if target.response_format else None
+            return extract_text_from_any_response(data, custom_text_field)
+    except httpx.ConnectError:
+        return f"[Target Connection Error]: Could not connect to {target.api_endpoint}. Ensure the server is online."
+    except httpx.TimeoutException:
+        return f"[Target Timeout Error]: Target {target.api_endpoint} timed out after 60 seconds."
+    except Exception as exc:
+        return f"[Target Request Failed]: {str(exc)}"
+
