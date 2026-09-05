@@ -1,6 +1,6 @@
-# PromptGuard
+# eagleI
 
-PromptGuard is an authorized-security-testing platform for HTTP chatbots. It ships with 60 varied attacks across 12 prompt-injection categories, ten payload mutations, layered explainable inspection, a moderately vulnerable offline demo target, and evidence-rich JSON/Markdown reports.
+eagleI is an authorized-security-testing platform for HTTP chatbots. It ships with 60 varied attacks across 12 prompt-injection categories, ten payload mutations, layered explainable inspection, a moderately vulnerable offline demo target, and evidence-rich JSON/Markdown reports.
 
 The curated upstream parameter repository in `corpus/upstream/` adds licensed,
 commit-pinned Promptfoo templates, Giskard technique definitions, Promptmap

@@ -14,7 +14,7 @@ from .services.mutator import mutate
 from .services.reporting import build_report, markdown_report
 
 Base.metadata.create_all(engine)
-app=FastAPI(title="PromptGuard — Prompt Injection Tester",version="1.0.0")
+app=FastAPI(title="eagleI — AI Security Testing Platform",version="1.0.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 def corpus(db): return [{"id":a.id,"category":a.category,"prompt":a.cleaned_prompt} for a in db.query(AttackPattern).all()]
