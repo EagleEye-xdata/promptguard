@@ -12,6 +12,7 @@ from .services.inspectors import inspect_request, inspect_response
 from .services.judge import judge
 from .services.mutator import mutate
 from .services.reporting import build_report, markdown_report
+from .services.session_window import session_windows
 
 Base.metadata.create_all(engine)
 app=FastAPI(title="eagleI — AI Security Testing Platform",version="1.0.0")
@@ -30,6 +31,16 @@ def create_target(body:TargetCreate,db:Session=Depends(get_db)):
 @app.get("/targets")
 def targets(db:Session=Depends(get_db)): return [{"id":x.id,"name":x.name,"api_endpoint":x.api_endpoint,"model_name":x.model_name,"capabilities":x.capabilities,"authorized":x.authorized} for x in db.query(Target).all()]
 
+def inspect_session(message:str,session_id:str,patterns:list[dict]):
+    """Inspect the current message and bounded conversation context; keep the riskier result."""
+    single=inspect_request(message,patterns)
+    window_text=session_windows.add_and_join(session_id,message)
+    if window_text==message:return {**single,"session_window_used":False}
+    combined=inspect_request(window_text,patterns)
+    used=combined["risk_score"]>single["risk_score"]
+    result=combined if used else single
+    return {**result,"session_window_used":used,"evidence":{**result["evidence"],"single_message_risk":single["risk_score"],"session_window_risk":combined["risk_score"]}}
+
 @app.get("/attacks")
 def attacks(category:str|None=None,severity:str|None=None,origin:str|None=None,q:str|None=None,db:Session=Depends(get_db)):
     query=db.query(AttackPattern)
@@ -40,7 +51,7 @@ def attacks(category:str|None=None,severity:str|None=None,origin:str|None=None,q
     return [{"id":a.id,"category":a.category,"title":a.title,"prompt":a.raw_prompt,"turns":a.turns,"expected_safe_behaviour":a.expected_safe_behaviour,"success_indicators":a.success_indicators,"failure_indicators":a.failure_indicators,"source_severity":a.source_severity,"remediation":a.remediation,"origin":a.origin,"mutation":a.mutation,"provenance":a.provenance} for a in query.limit(1000)]
 
 @app.post("/inspect/request")
-def inspect_req(body:InspectRequest,db:Session=Depends(get_db)): return inspect_request(body.prompt_text,corpus(db))
+def inspect_req(body:InspectRequest,db:Session=Depends(get_db)): return inspect_session(body.prompt_text,body.session_id,corpus(db))
 
 @app.post("/inspect/response")
 async def inspect_resp(body:InspectResponse):
@@ -112,7 +123,7 @@ def report(run_id:int,format:str="json",db:Session=Depends(get_db)):
 async def proxy(body:ProxyRequest,db:Session=Depends(get_db)):
     target=db.get(Target,body.target_id)
     if not target:raise HTTPException(404,"target not found")
-    req=inspect_request(body.message,corpus(db))
+    req=inspect_session(body.message,body.session_id,corpus(db))
     if req["action"]=="BLOCK": return {"response":None,"request_verdict":req,"response_verdict":None,"notice":"blocked by proxy"}
     response=await call_target(target,body.message,body.session_id); resp=inspect_response(response,[],[],target.system_prompt_canary,await judge(body.message,response,"live inspection","safe assistance",target.declared_policy))
     final=None if resp["action"]=="BLOCK" else resp["redacted_response"] if resp["action"]=="REDACT" else response

@@ -16,6 +16,19 @@ docker compose up --build
 
 Open [the dashboard](http://localhost:5173), [API docs](http://localhost:8000/docs), or run `make demo` from Git Bash/WSL. No model key is required: `JUDGE_PROVIDER=none` and the mock target preserve the deterministic pipeline. The demo target is registered automatically.
 
+## Detection engine
+
+eagleI combines deterministic attack rules, corpus similarity, nested encoding
+decoding, Unicode/homoglyph normalization, multi-turn session-window analysis,
+and response-side secret redaction. Unknown high-entropy tokens are treated as
+possible secrets even when they do not have a familiar API-key prefix.
+
+The optional AI jury can use one provider or require agreement across multiple
+independent providers. Set `JUDGE_PROVIDER=openai,anthropic,google` and provide
+the corresponding API keys to enable it. `JUDGE_PROVIDER=none` keeps the fully
+offline deterministic mode. Provider failures produce an inconclusive result
+instead of bypassing the deterministic checker.
+
 ## Three-minute demo
 
 1. Open Attack Library and show 60 attacks / 12 categories, then expand one finding to show expected behavior and remediation.
