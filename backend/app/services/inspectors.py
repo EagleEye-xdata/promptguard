@@ -15,7 +15,22 @@ RULES = [
  ("disclosure-intent", "system_prompt_extraction", re.compile(r"disclos(?:e|ure)|dump|emit|expose|reconstruct|reproduce|return the exact|numbered checklist", re.I), 45),
  ("authority-claim", "instruction_hierarchy", re.compile(r"administrator|operator|authority update|granted permission|backend diagnostic|developer>", re.I), 38),
  ("indirect-command", "indirect_injection", re.compile(r"retrieved (?:web)?page says|document says|execute the phrase|instruction (?:inside|in) (?:the )?(?:document|page|email)", re.I), 48),
+ ("payload-variables", "payload_splitting", re.compile(r"(?:part|fragment|variable)\s*[1-9a-z]\s*=|concatenate|join (?:the )?(?:parts|fragments|variables)|execute .{0,20}(?:a\+b|stored instruction|combined)", re.I), 58),
+ ("fake-history", "context_manipulation", re.compile(r"(?:conversation|chat) (?:history|recap)|(?:user|assistant)\s*:.{0,160}(?:user|assistant)\s*:|previously (?:approved|agreed|authorized)", re.I|re.S), 86),
+ ("prefix-coercion", "instruction_override", re.compile(r"(?:begin|start|prefix) (?:your|the) (?:answer|response|reply).{0,60}(?:with|by saying)|respond only with|must first say", re.I), 52),
+ ("refusal-suppression", "jailbreak", re.compile(r"(?:do not|don't|never|must not) (?:say|use|include|mention).{0,80}(?:sorry|cannot|can't|unable|refus|warning|policy|safety)|without (?:a |any )?(?:warning|refusal|disclaimer)", re.I), 62),
+ ("nested-instruction", "indirect_injection", re.compile(r"(?:todo|note|instruction|comment)\s*:.{0,120}(?:ignore|reveal|override|bypass)|<(?:document|retrieved|context)>.*(?:ignore|reveal|override)", re.I|re.S), 56),
+ ("known-jailbreak-persona", "jailbreak", re.compile(r"\b(?:DAN|STAN|DUDE|AIM|AntiGPT|Developer Mode|Anarchy Mode|unfiltered (?:AI|model)|no restrictions? (?:AI|model))\b", re.I), 64),
+ ("fictional-policy-bypass", "jailbreak", re.compile(r"(?:fictional|hypothetical|roleplay|simulate).{0,100}(?:no (?:rules|restrictions|filters)|unfiltered|policy does not apply|always (?:comply|obey|answer))", re.I|re.S), 55),
+ ("policy-bypass-command", "instruction_override", re.compile(r"forget (?:everything|all).{0,50}(?:told|rules|instructions)|override (?:(?:all|your)\s+){0,2}(?:safety |ethical )?(?:guidelines|instructions|rules)|ignore (?:all )?(?:your )?(?:training|safety protocols?|safeguards)|(?:start fresh|act as if).{0,50}(?:without (?:rules|restrictions)|jailbroken|no ethical constraints)|must comply.{0,60}(?:regardless|programming)|without (?:limitations|restrictions)", re.I|re.S), 82),
 ]
+
+TECHNIQUE_SOURCES={
+ "payload-variables":"GK-002","delimiter":"GK-003","prefix-coercion":"GK-004",
+ "fake-history":"GK-005","nested-instruction":"GK-006","refusal-suppression":"GK-007",
+ "known-jailbreak-persona":"GK-011..GK-018","fictional-policy-bypass":"GK-017",
+ "policy-bypass-command":"GK-007/GK-017",
+}
 
 def _tokens(s:str)->Counter:
     return Counter(re.findall(r"[a-z0-9]+",s.lower()))
@@ -34,6 +49,20 @@ def normalize(text:str)->tuple[str,list[dict[str,Any]]]:
             if len(decoded)>8 and sum(c.isprintable() for c in decoded)/len(decoded)>.9:
                 normalized=decoded; evidence.append({"type":kind,"decoded":decoded[:1000]}); break
         except (ValueError,UnicodeError,binascii.Error): pass
+    # Decode payloads embedded in otherwise benign-looking wrapper text.
+    if not evidence:
+        for token in re.findall(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])",normalized):
+            try:
+                decoded=base64.b64decode(token,validate=True).decode()
+                if len(decoded)>8 and sum(c.isprintable() for c in decoded)/len(decoded)>.9:
+                    normalized=normalized.replace(token,decoded);evidence.append({"type":"embedded_base64","decoded":decoded[:1000]})
+            except (ValueError,UnicodeError,binascii.Error):pass
+        for token in re.findall(r"\b(?:[0-9a-fA-F]{2}){12,}\b",normalized):
+            try:
+                decoded=bytes.fromhex(token).decode()
+                if sum(c.isprintable() for c in decoded)/len(decoded)>.9:
+                    normalized=normalized.replace(token,decoded);evidence.append({"type":"embedded_hex","decoded":decoded[:1000]})
+            except (ValueError,UnicodeError):pass
     dehom=normalized.translate(str.maketrans({"а":"a","е":"e","о":"o","р":"p","с":"c"}))
     if dehom != normalized: evidence.append({"type":"homoglyph","decoded":dehom[:1000]}); normalized=dehom
     # Apply leetspeak decoding only when multiple substitutions appear. This
@@ -46,7 +75,7 @@ def normalize(text:str)->tuple[str,list[dict[str,Any]]]:
 
 def inspect_request(text:str, corpus:list[dict[str,Any]], judge_score:float|None=None)->dict[str,Any]:
     started=time.perf_counter(); normalized,decoded=normalize(text)
-    matched=[{"name":n,"category":c,"weight":w,"match":m.group(0)} for n,c,r,w in RULES if (m:=r.search(normalized))]
+    matched=[{"name":n,"category":c,"weight":w,"match":m.group(0)[:240],"technique_source":TECHNIQUE_SOURCES.get(n)} for n,c,r,w in RULES if (m:=r.search(normalized))]
     rule_score=min(100,sum(x["weight"] for x in matched))
     best={"id":None,"score":0.0,"category":None}
     normalized_lower=" ".join(normalized.lower().split())
@@ -71,7 +100,7 @@ def inspect_request(text:str, corpus:list[dict[str,Any]], judge_score:float|None
     confidence=min(.98,.35+.18*signals)
     action="BLOCK" if risk>=70 and confidence>=.6 and signals>=2 else "REVIEW" if risk>=30 else "ALLOW"
     category=(matched[0]["category"] if matched else best["category"])
-    return {"attack_detected":action!="ALLOW","attack_type":category,"risk_score":round(risk,2),"confidence":round(confidence,2),"action":action,"evidence":{"matched_rules":matched,"top_similarity":best,"decoded_obfuscation":decoded,"benign_discussion_context":discussion,"judge":{"used":judge_used,"score":judge_score},"timings":{"total_ms":round((time.perf_counter()-started)*1000,3)}}}
+    return {"attack_detected":action!="ALLOW","attack_type":category,"risk_score":round(risk,2),"confidence":round(confidence,2),"action":action,"evidence":{"matched_rules":matched,"matched_techniques":[{"rule":x["name"],"source":x["technique_source"]} for x in matched if x["technique_source"]],"top_similarity":best,"decoded_obfuscation":decoded,"benign_discussion_context":discussion,"judge":{"used":judge_used,"score":judge_score},"timings":{"total_ms":round((time.perf_counter()-started)*1000,3)}}}
 
 LEAKS=[("openai_key","secret",re.compile(r"sk-[A-Za-z0-9_-]{16,}"),100),("aws_key","secret",re.compile(r"AKIA[0-9A-Z]{16}"),100),("jwt","secret",re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),95),("email","pii",re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"),60),("ssn","pii",re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),90)]
 
