@@ -1,6 +1,6 @@
 import json, random, uuid
 from datetime import datetime
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
@@ -13,10 +13,12 @@ from .services.judge import judge
 from .services.mutator import mutate
 from .services.reporting import build_report, markdown_report
 from .services.session_window import session_windows
+from .services.secrets import protect
+from .config import settings
 
 Base.metadata.create_all(engine)
 app=FastAPI(title="eagleI — AI Security Testing Platform",version="1.0.0")
-app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
+app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],allow_methods=["*"],allow_headers=["*"])
 
 def corpus(db): return [{"id":a.id,"category":a.category,"prompt":a.cleaned_prompt} for a in db.query(AttackPattern).all()]
 def severity(score): return "CRITICAL" if score>=80 else "HIGH" if score>=60 else "MEDIUM" if score>=30 else "LOW"
@@ -26,7 +28,7 @@ def health(db:Session=Depends(get_db)): return {"status":"ok","database":"connec
 
 @app.post("/targets",status_code=201)
 def create_target(body:TargetCreate,db:Session=Depends(get_db)):
-    target=Target(name=body.name,api_endpoint=body.api_endpoint,auth_config_encrypted=body.auth_header,model_name=body.model_name,request_format={"preset":body.format_preset,**body.request_format},response_format=body.response_format,capabilities=body.capabilities,system_prompt_canary=body.canary,declared_policy=body.declared_policy,authorized=True); db.add(target); db.commit(); return {"target_id":target.id,"name":target.name}
+    target=Target(name=body.name,api_endpoint=body.api_endpoint,auth_config_encrypted=protect(body.auth_header,settings.encryption_key),model_name=body.model_name,request_format={"preset":body.format_preset,**body.request_format},response_format=body.response_format,capabilities=body.capabilities,system_prompt_canary=body.canary,declared_policy=body.declared_policy,authorized=True); db.add(target); db.commit(); return {"target_id":target.id,"name":target.name}
 
 @app.get("/targets")
 def targets(db:Session=Depends(get_db)): return [{"id":x.id,"name":x.name,"api_endpoint":x.api_endpoint,"model_name":x.model_name,"capabilities":x.capabilities,"authorized":x.authorized} for x in db.query(Target).all()]
@@ -79,7 +81,9 @@ async def execute_run(run_id:int):
                 mid=f"MUT-{uuid.uuid4().hex[:12]}"; ma=AttackPattern(id=mid,category=a.category,title=f"{a.title} [{m}]",raw_prompt=prompt,cleaned_prompt=prompt,raw_hash=uuid.uuid4().hex,parameters={},presumptions=a.presumptions,expected_safe_behaviour=a.expected_safe_behaviour,success_indicators=a.success_indicators,failure_indicators=a.failure_indicators,source_severity=a.source_severity,remediation=a.remediation,origin="mutated",parent_pattern_id=a.id,mutation=m,turns=value if isinstance(value,list) else None,provenance={"parent":a.id}); db.add(ma); db.flush(); work.append((ma,prompt,m))
         run.total=len(work); db.commit()
         for seq,(a,prompt,mutation_name) in enumerate(work,1):
-            req=inspect_request(prompt,corpus(db)); reached=not(run.config.get("enforce_request_block") and req["action"]=="BLOCK")
+            root_id=a.parent_pattern_id or a.id
+            family={str(row.id) for row in db.query(AttackPattern).filter((AttackPattern.id==root_id)|(AttackPattern.parent_pattern_id==root_id)).all()}
+            req=inspect_request(prompt,corpus(db),exclude_ids=family); reached=not(run.config.get("enforce_request_block") and req["action"]=="BLOCK")
             started=datetime.utcnow(); response=None
             try:
                 if not target.capabilities.get("multi_turn",True) and a.turns:
@@ -120,7 +124,8 @@ def report(run_id:int,format:str="json",db:Session=Depends(get_db)):
     return PlainTextResponse(markdown_report(data),media_type="text/markdown") if format=="md" else data
 
 @app.post("/proxy/chat")
-async def proxy(body:ProxyRequest,db:Session=Depends(get_db)):
+async def proxy(body:ProxyRequest,db:Session=Depends(get_db),x_eaglei_proxy_key:str|None=Header(default=None)):
+    if settings.proxy_api_key and x_eaglei_proxy_key!=settings.proxy_api_key:raise HTTPException(401,"invalid or missing X-eagleI-Proxy-Key")
     target=db.get(Target,body.target_id)
     if not target:raise HTTPException(404,"target not found")
     req=inspect_session(body.message,body.session_id,corpus(db))

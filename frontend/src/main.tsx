@@ -535,7 +535,7 @@ function Library({ items }: any) {
         </div>
         <div>
           <span>⌁</span>
-          <b>10</b>
+          <b>{MUTATIONS.length}</b>
           <small>mutation strategies</small>
         </div>
       </div>
@@ -611,8 +611,11 @@ const MUTATIONS = [
   "roleplay_wrap",
   "delimiter_inject",
   "split_2_turns",
+  "split_3_turns",
   "translate_hi",
   "markdown_hide",
+  "html_comment_wrap",
+  "staged_roleplay",
 ];
 function Runner({ targets, attacks, run, start }: any) {
   const [id, setId] = useState(targets[0]?.id);

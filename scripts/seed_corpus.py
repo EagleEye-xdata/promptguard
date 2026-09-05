@@ -14,7 +14,7 @@ def main():
         for r in data.get("attacks",[]):
             prompt=r["prompt"]; digest=sha256(prompt.encode()).hexdigest()
             if db.get(AttackPattern,r["id"]): continue
-            db.add(AttackPattern(id=r["id"],category=r["category"],title=r["title"],raw_prompt=prompt,cleaned_prompt=" ".join(prompt.split()),raw_hash=digest,parameters=r.get("parameters",{}),presumptions=r.get("presumptions",[]),expected_safe_behaviour=r["expected_safe_behaviour"],success_indicators=r["success_indicators"],failure_indicators=r["failure_indicators"],source_severity=r["source_severity"],remediation=r["remediation"],origin=r.get("origin","seed"),turns=r.get("turns"),validation_status=r.get("validation_status","accepted"),provenance={"source":"in-repo","file":str(path.relative_to(ROOT))}))
+            db.add(AttackPattern(id=r["id"],category=r["category"],title=r["title"],raw_prompt=prompt,cleaned_prompt=" ".join(prompt.split()),raw_hash=digest,parameters=r.get("parameters",{}),presumptions=r.get("presumptions",[]),expected_safe_behaviour=r["expected_safe_behaviour"],success_indicators=r["success_indicators"],failure_indicators=r["failure_indicators"],source_severity=r["source_severity"],remediation=r["remediation"],origin=r.get("origin","seed"),turns=r.get("turns"),validation_status=r.get("validation_status","accepted"),provenance={**r.get("provenance",{}),"file":str(path.relative_to(ROOT))}))
     # Licensed, curated upstream templates are runtime material. The separate
     # evaluation_dataset.jsonl is intentionally never loaded here.
     upstream=ROOT/"corpus"/"upstream"/"attack_templates.jsonl"
