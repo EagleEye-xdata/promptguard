@@ -39,6 +39,9 @@ python scripts/benchmark.py
 cd frontend && npm install && npm run build
 ```
 
+To reset local demo results without removing curated attacks or target
+configuration, run `python scripts/clean_demo_data.py --yes`.
+
 ## Design notes
 
 - Request risk: rules 35%, similarity 30%, obfuscation 10%, optional judge 25%. A single signal cannot block.
