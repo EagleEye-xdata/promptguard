@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "attack_templates": 74,
+  "technique_parameters": 19,
+  "evaluation_examples": 30,
+  "duplicates_removed": 0,
+  "excluded_sources": [
+    "dvaia",
+    "llm_sentinel_detector"
+  ],
+  "excluded_data": [
+    "source_code",
+    "tests",
+    "binaries",
+    "images",
+    "audio",
+    "generated_reports",
+    "documentation",
+    "dependencies",
+    "secrets",
+    "empty_records",
+    "unlicensed_sources"
+  ],
+  "separation": {
+    "runtime_templates": "attack_templates.jsonl",
+    "generation_metadata": "technique_parameters.jsonl",
+    "evaluation_only": "evaluation_dataset.jsonl"
+  }
+}

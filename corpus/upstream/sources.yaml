@@ -1,0 +1,46 @@
+schema_version: 1
+sources:
+  - id: promptfoo
+    repository_url: https://github.com/promptfoo/promptfoo
+    pinned_commit: bfcd0674689c538df416b7cfac4e762614149fb7
+    license: MIT
+    status: included
+    include:
+      - src/redteam/strategies/promptInjections/data.ts
+    purpose: attack_templates
+  - id: giskard
+    repository_url: https://github.com/Giskard-AI/giskard-oss
+    pinned_commit: 580754b4ae77057d154791b8f1d0c2bedeffee84
+    license: Apache-2.0
+    status: included
+    include:
+      - libs/giskard-scan/src/giskard/scan/generators/data/prompt_injection.jsonl
+    purpose: technique_parameters
+  - id: promptmap
+    repository_url: https://github.com/8vana/promptmap
+    pinned_commit: 8c955454e8a3f9fe40402b57b82ad38d1e7e474f
+    license: Apache-2.0
+    status: included
+    include:
+      - staging/attacks/*/attack_catalog.yaml
+    purpose: attack_method_parameters
+  - id: llm_sentinel_proxy
+    repository_url: https://github.com/raaihank/llm-sentinel
+    pinned_commit: 7035523ac05c928edb3592578c8bcf8e170d8e11
+    license: MIT
+    status: included
+    include:
+      - data/sample_security_dataset.csv
+    purpose: evaluation_only
+  - id: dvaia
+    repository_url: https://github.com/airtasystems/DVAIA-Damn-Vulnerable-AI-Application
+    pinned_commit: f24008e9c4f0eb4a72ac2630c27090017b7472e9
+    license: unknown
+    status: excluded_no_license
+    purpose: architecture_reference_only
+  - id: llm_sentinel_detector
+    repository_url: https://github.com/chaudharydeepak/LLM-Sentinel
+    pinned_commit: 8868a6341f4997d7a3085dfe7d4388b9d29e82d7
+    license: unknown
+    status: excluded_no_license
+    purpose: architecture_reference_only

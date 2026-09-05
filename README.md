@@ -2,6 +2,12 @@
 
 PromptGuard is an authorized-security-testing platform for HTTP chatbots. It ships with 60 varied attacks across 12 prompt-injection categories, ten payload mutations, layered explainable inspection, a moderately vulnerable offline demo target, and evidence-rich JSON/Markdown reports.
 
+The curated upstream parameter repository in `corpus/upstream/` adds licensed,
+commit-pinned Promptfoo templates, Giskard technique definitions, Promptmap
+method parameters, and an evaluation-only LLM-Sentinel dataset. Rebuild it with
+`scripts/build_upstream_corpus.py`; unlicensed sources and irrelevant repository
+content are excluded by design.
+
 ## Run in under five minutes
 
 ```bash
