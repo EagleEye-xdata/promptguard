@@ -49,5 +49,7 @@ class ProxyRequest(BaseModel):
     message: str
 
 class GeneratePayload(BaseModel):
-    attack_pattern_id: str
-    mutations: list[str]
+    attack_pattern_id: str | None = None
+    prompt_text: str | None = None
+    mutations: list[str] = Field(default_factory=list)
+

@@ -62,9 +62,15 @@ async def inspect_resp(body:InspectResponse):
 
 @app.post("/generate-payload")
 def generate(body:GeneratePayload,db:Session=Depends(get_db)):
-    a=db.get(AttackPattern,body.attack_pattern_id)
-    if not a: raise HTTPException(404,"attack not found")
-    return {"attack_pattern_id":a.id,"variants":[{"mutation":m,"payload":mutate(a.raw_prompt,m)} for m in body.mutations]}
+    prompt=body.prompt_text
+    aid=body.attack_pattern_id
+    if aid:
+        a=db.get(AttackPattern,aid)
+        if a:prompt=a.raw_prompt
+    if not prompt:raise HTTPException(400,"Must provide prompt_text or valid attack_pattern_id")
+    available_mutations=body.mutations if body.mutations else ["base64","hex","leetspeak","unicode_homoglyph","zero_width_insert","roleplay_wrap","delimiter_inject","split_2_turns","translate_hi","html_comment_wrap"]
+    return {"attack_pattern_id":aid,"original_prompt":prompt,"variants":[{"mutation":m,"payload":mutate(prompt,m)} for m in available_mutations]}
+
 
 async def execute_run(run_id:int):
     db=SessionLocal()
@@ -129,11 +135,17 @@ async def proxy(body:ProxyRequest,db:Session=Depends(get_db),x_eaglei_proxy_key:
     target=db.get(Target,body.target_id)
     if not target:raise HTTPException(404,"target not found")
     req=inspect_session(body.message,body.session_id,corpus(db))
-    if req["action"]=="BLOCK": return {"response":None,"request_verdict":req,"response_verdict":None,"notice":"blocked by proxy"}
+    if req["action"]=="BLOCK":
+        db.add(Alert(severity=severity(req["risk_score"]),category=req.get("attack_type") or "prompt_injection",message=f"Blocked prompt injection: {req.get('attack_type') or 'malicious prompt'}",evidence={"request":req,"session_id":body.session_id,"target_name":target.name}))
+        db.commit()
+        return {"response":None,"request_verdict":req,"response_verdict":None,"notice":"blocked by proxy"}
     response=await call_target(target,body.message,body.session_id); resp=inspect_response(response,[],[],target.system_prompt_canary,await judge(body.message,response,"live inspection","safe assistance",target.declared_policy))
     final=None if resp["action"]=="BLOCK" else resp["redacted_response"] if resp["action"]=="REDACT" else response
-    if req["action"]=="BLOCK" or resp["action"] in {"BLOCK","REDACT"}: db.add(Alert(severity=severity(max(req["risk_score"],resp["risk_score"])),category=req.get("attack_type") or resp.get("leakage_type") or "unknown",message="Live proxy intervention",evidence={"request":req,"response":resp})); db.commit()
+    if resp["action"] in {"BLOCK","REDACT"}:
+        db.add(Alert(severity=severity(resp["risk_score"]),category=resp.get("leakage_type") or "leakage",message=f"Intervened on model response: {resp['action']}",evidence={"request":req,"response":resp,"session_id":body.session_id,"target_name":target.name}))
+        db.commit()
     return {"response":final,"request_verdict":req,"response_verdict":resp}
+
 
 @app.get("/alerts")
 def alerts(db:Session=Depends(get_db)): return [{"id":a.id,"severity":a.severity,"category":a.category,"message":a.message,"evidence":a.evidence,"created_at":a.created_at} for a in db.query(Alert).order_by(Alert.id.desc()).limit(100)]
